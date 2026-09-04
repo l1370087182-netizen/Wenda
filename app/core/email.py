@@ -23,7 +23,13 @@ def _render_email(subject: str, html: str) -> MIMEMultipart:
     msg = MIMEMultipart("alternative")
     msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = formataddr((str(Header(settings.email_from_name, "utf-8")), settings.smtp_user))
-    msg["To"] = ""
+    # 注意：To 头由 _smtp_send_sync 按实际收件人设置一次，此处不能预置（会追加成多个 To 头，
+    # 触发 Gmail "not RFC 5322 compliant / multiple To headers" 拒信）
+    # 缺少 Date/Message-ID 也是常见退信诱因（部分 MTA 直接拒收），必须显式补上
+    from email.utils import formatdate, make_msgid
+
+    msg["Date"] = formatdate(localtime=False)
+    msg["Message-ID"] = make_msgid(domain=settings.smtp_user.split("@")[-1] if "@" in settings.smtp_user else "localhost")
     msg.attach(MIMEText(html, "html", "utf-8"))
     return msg
 
