@@ -1,0 +1,47 @@
+# 生产部署：2C2G 单机（app + postgres(pgvector) + redis）
+services:
+  app:
+    build: .
+    env_file: .env
+    environment:
+      # 容器内连接服务名（覆盖 .env 中的 localhost）
+      DATABASE_URL: postgresql+asyncpg://news:news@postgres:5432/news
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    mem_limit: 1g
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: news
+      POSTGRES_PASSWORD: news
+      POSTGRES_DB: news
+    command: ["postgres", "-c", "shared_buffers=128MB"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    mem_limit: 320m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U news"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "48mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redisdata:/data
+    mem_limit: 64m
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
