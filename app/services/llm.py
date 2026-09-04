@@ -178,3 +178,24 @@ async def test_config(cfg: LLMConfig) -> dict:
         return {"ok": True, "detail": f"模型响应：{reply[:50]}", "latency_ms": int((time.monotonic() - start) * 1000)}
     except Exception as e:
         return {"ok": False, "detail": f"{type(e).__name__}: {e}", "latency_ms": int((time.monotonic() - start) * 1000)}
+
+
+async def detect_provider(base_url: str, api_key: str, model_fast: str, model_strong: str) -> dict:
+    """自动识别协议类型：依次用 openai / anthropic 协议 ping，返回第一个通的。
+
+    启发式排序：URL 含 anthropic 或模型名含 claude → 先试 anthropic。
+    返回 {provider: "openai"|"anthropic"|None, detail, latency_ms, attempts}。
+    """
+    text = (base_url + " " + model_fast + " " + model_strong).lower()
+    order = ["anthropic", "openai"] if ("anthropic" in text or "claude" in text) else ["openai", "anthropic"]
+
+    attempts: list[str] = []
+    for provider in order:
+        cfg = LLMConfig(provider=provider, base_url=base_url, api_key=api_key,
+                        model_fast=model_fast, model_strong=model_strong)
+        r = await test_config(cfg)
+        if r["ok"]:
+            return {"provider": provider, "detail": r["detail"], "latency_ms": r["latency_ms"], "attempts": attempts}
+        attempts.append(f"{provider}: {r['detail'][:150]}")
+
+    return {"provider": None, "detail": "两种协议均失败；" + "；".join(attempts), "latency_ms": 0, "attempts": attempts}

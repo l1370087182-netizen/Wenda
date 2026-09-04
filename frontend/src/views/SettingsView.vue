@@ -26,6 +26,7 @@
       <el-form label-position="top">
         <el-form-item label="协议">
           <el-radio-group v-model="llmForm.provider">
+            <el-radio value="auto">自动识别（推荐）</el-radio>
             <el-radio value="openai">OpenAI 兼容（豆包/DeepSeek/通义/OneAPI 等）</el-radio>
             <el-radio value="anthropic">Anthropic（Claude）</el-radio>
           </el-radio-group>
@@ -49,8 +50,8 @@
         <el-button v-if="!llm.using_system" type="danger" plain @click="clearLlm">清除，用回系统模型</el-button>
       </div>
       <el-alert v-if="testResult" :type="testResult.ok ? 'success' : 'error'" :closable="false" show-icon
-                :title="`${testResult.ok ? '连接成功' : '连接失败'}（${testResult.latency_ms}ms）`" :description="testResult.detail"
-                style="margin-top:12px" />
+                :title="`${testResult.ok ? '连接成功' : '连接失败'}${testResult.provider ? '（识别为 ' + testResult.provider + ' 协议）' : ''}（${testResult.latency_ms}ms）`"
+                :description="testResult.detail" style="margin-top:12px" />
     </el-card>
   </div>
 </template>
@@ -78,7 +79,7 @@ onMounted(async () => {
   notify.value = me.notify_enabled
   cats.value = me.subscribed_categories || []
   llm.value = await api.get('/users/me/llm-config')
-  llmForm.value.provider = llm.value.provider
+  llmForm.value.provider = llm.value.using_system ? 'auto' : llm.value.provider
   llmForm.value.base_url = llm.value.using_system ? '' : llm.value.base_url
   llmForm.value.model_fast = llm.value.using_system ? '' : llm.value.model_fast
   llmForm.value.model_strong = llm.value.using_system ? '' : llm.value.model_strong

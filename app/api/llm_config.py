@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/users/me/llm-config", tags=["llm-config"])
 
 
 class LLMConfigIn(BaseModel):
-    provider: str = Field(pattern="^(openai|anthropic)$")
+    provider: str = Field(pattern="^(openai|anthropic|auto)$", description="auto=自动识别协议")
     base_url: str = Field(default="", max_length=1024)
     api_key: str = Field(default="", max_length=512)
     model_fast: str = Field(default="", max_length=128)
@@ -70,14 +70,29 @@ async def save_config(body: LLMConfigIn, user: User = Depends(get_current_user),
     if not body.model_fast and not body.model_strong:
         raise HTTPException(400, "至少填写一个模型名（model_fast 或 model_strong）")
     row = await _get_row(db, user.id)
+    # api_key 留空/掩码 = 保留旧值
+    effective_key = body.api_key
+    if not effective_key or "****" in effective_key:
+        if row is None:
+            raise HTTPException(400, "api_key 为空且无已保存配置")
+        effective_key = row.api_key
+
+    provider = body.provider
+    if provider == "auto":
+        # 自动识别协议（探测成功才落库）
+        from app.services.llm import detect_provider
+
+        r = await detect_provider(body.base_url.strip(), effective_key, body.model_fast.strip(), body.model_strong.strip())
+        if not r["provider"]:
+            raise HTTPException(400, f"协议自动识别失败：{r['detail']}")
+        provider = r["provider"]
+
     if row is None:
         row = UserLLMConfig(user_id=user.id)
         db.add(row)
-    row.provider = body.provider
+    row.provider = provider
     row.base_url = body.base_url.strip()
-    # api_key 留空 = 保留旧值（前端只回显掩码）
-    if body.api_key and "****" not in body.api_key:
-        row.api_key = body.api_key.strip()
+    row.api_key = effective_key
     row.model_fast = body.model_fast.strip()
     row.model_strong = body.model_strong.strip()
     await db.commit()
@@ -95,7 +110,7 @@ async def clear_config(user: User = Depends(get_current_user), db: AsyncSession 
 
 
 class TestIn(LLMConfigIn):
-    """允许测试未保存的配置（api_key 传 '****…' 掩码时自动用已保存的值）。"""
+    """允许测试未保存的配置（api_key 传 '****…' 掩码时自动用已保存的值）。provider 可为 auto。"""
 
 
 @router.post("/test")
@@ -106,10 +121,22 @@ async def test(body: TestIn, user: User = Depends(get_current_user), db: AsyncSe
         if saved is None:
             raise HTTPException(400, "api_key 为空且无已保存配置")
         api_key = saved.api_key
+    if not (body.model_fast.strip() or body.model_strong.strip()):
+        raise HTTPException(400, "至少填写一个模型名")
+
+    if body.provider == "auto":
+        from app.services.llm import detect_provider
+
+        r = await detect_provider(body.base_url.strip(), api_key, body.model_fast.strip(), body.model_strong.strip())
+        return {
+            "ok": r["provider"] is not None,
+            "provider": r["provider"],
+            "detail": r["detail"],
+            "latency_ms": r["latency_ms"],
+        }
+
     cfg = LLMConfig(
         provider=body.provider, base_url=body.base_url.strip(), api_key=api_key,
         model_fast=body.model_fast.strip(), model_strong=body.model_strong.strip(),
     )
-    if not (cfg.model_fast or cfg.model_strong):
-        raise HTTPException(400, "至少填写一个模型名")
     return await test_config(cfg)

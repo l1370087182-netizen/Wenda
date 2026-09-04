@@ -2,7 +2,7 @@
   <div class="chat-layout">
     <!-- 会话侧栏 -->
     <el-card shadow="never" class="side">
-      <el-button type="primary" style="width:100%" @click="newChat">＋ 新对话</el-button>
+      <el-button type="primary" style="width:100%" :plain="chatId !== null" @click="newChat">＋ 新对话</el-button>
       <div class="chat-list">
         <div v-for="c in chats" :key="c.chat_id" class="chat-item" :class="{ active: c.chat_id === chatId }" @click="openChat(c.chat_id)">
           {{ c.title }}
@@ -66,6 +66,9 @@ async function loadSkills() {
 function newChat() {
   chatId.value = null
   messages.value = []
+  question.value = ''
+  // 视觉反馈：清空气泡 + 聚焦输入框；按钮在 chatId===null 时变为实心（见模板 :plain）
+  nextTick(() => document.querySelector('.input-row input')?.focus())
 }
 
 async function openChat(id) {
