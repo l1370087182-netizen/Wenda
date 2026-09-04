@@ -1,7 +1,11 @@
 <template>
-  <el-container v-if="logged" class="layout">
+  <!-- 未登录：只渲染认证页 -->
+  <AuthView v-if="!logged" />
+
+  <!-- 已登录：主布局 -->
+  <el-container v-else class="layout">
     <el-header class="topbar">
-      <span class="logo">📰 六类资讯日报</span>
+      <span class="logo">📰 闻达 Wenda · 六类资讯日报</span>
       <el-menu mode="horizontal" :default-active="active" router :ellipsis="false" class="nav">
         <el-menu-item index="/dashboard">看板</el-menu-item>
         <el-menu-item index="/chat">问答</el-menu-item>
@@ -11,14 +15,13 @@
     </el-header>
     <el-main><router-view /></el-main>
   </el-container>
-
-  <!-- 未登录跳认证页 -->
 </template>
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from './api'
+import AuthView from './views/AuthView.vue'
 
 const logged = ref(false)
 const route = useRoute()
@@ -31,16 +34,15 @@ onMounted(async () => {
   try {
     await api.get('/auth/me')
     logged.value = true
+    if (route.path === '/auth') router.replace('/dashboard')
   } catch {
     logged.value = false
-    router.push('/auth')
   }
 })
 
 async function logout() {
   await api.post('/auth/logout').catch(() => {})
   logged.value = false
-  router.push('/auth')
 }
 </script>
 
