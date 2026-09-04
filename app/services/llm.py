@@ -61,13 +61,23 @@ def system_llm_config() -> LLMConfig:
 
 
 def _endpoint(base_url: str, default_path: str) -> str:
-    """按头部规则拼接端点。"""
+    """按头部规则拼接端点。
+
+    - `#` 结尾 → 完整端点原样使用
+    - 已含完整默认路径 → 不重复拼接
+    - 已含版本前缀（如 /v1、/v3，cc-switch 类代理常见写法）→ 只补剩余段：
+      https://x.com/v1 + /v1/messages → https://x.com/v1/messages
+    - 否则 → base + 默认路径
+    """
     base = (base_url or "").strip()
     if base.endswith("#"):
         return base[:-1]
     base = base.rstrip("/")
     if base.endswith(default_path):
         return base
+    first_seg = "/" + default_path.strip("/").split("/")[0]
+    if base.endswith(first_seg):
+        return base + default_path[len(first_seg):]
     return base + default_path
 
 

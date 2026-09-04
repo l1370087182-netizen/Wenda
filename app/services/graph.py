@@ -487,10 +487,13 @@ def _route_messages(question: str) -> list[dict]:
 async def run_chat(db: AsyncSession, *, question: str, history: list[dict], cfg=None) -> dict:
     """研究问答入口：路由（含技能匹配）→ 单轮快速通道 / 研究 Agent。返回 {answer, sources}。
     cfg：用户自带 LLM 配置（BYOK），None 时用系统配置。"""
+    # route 预初始化：路由 LLM 调用失败时不至于 UnboundLocalError（并掩盖真实错误）
+    route: dict = {}
     try:
         route = await llm.chat_json(_route_messages(question), cfg=cfg)
         qtype = route.get("type", "factual")
-    except Exception:
+    except Exception as e:
+        logger.warning("问答路由失败，降级 factual：%s", e)
         qtype = "factual"
 
     # 渐进式披露第二级：命中技能才加载正文

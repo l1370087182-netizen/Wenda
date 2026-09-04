@@ -62,8 +62,11 @@ async def chat(
 
     try:
         result = await run_chat(db, question=body.question, history=history, cfg=cfg)
-    except Exception as e:  # 编排失败也要给用户反馈
-        answer = f"抱歉，问答服务暂时不可用（{type(e).__name__}），请稍后重试。"
+    except Exception as e:  # 编排失败也要给用户反馈（带真实原因，便于自查 URL/Key 配置）
+        import logging
+
+        logging.getLogger(__name__).exception("问答编排失败")
+        answer = f"抱歉，问答服务暂时不可用（{type(e).__name__}: {e}）。若为模型配置问题，请到「设置 → 外部模型」点“测试连接”排查。"
         result = {"answer": answer, "sources": []}
 
     db.add(ChatMessage(
