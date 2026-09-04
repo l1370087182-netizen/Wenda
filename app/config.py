@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     code_expire_minutes: int = 10
     code_send_interval_seconds: int = 60   # 同邮箱两次发码最小间隔（限流）
 
-    # ---- LLM / Embedding（OpenAI 兼容 API）----
+    # ---- LLM / Embedding（OpenAI 兼容 API；provider 可选 anthropic）----
+    llm_provider: str = "openai"   # openai / anthropic
     llm_api_key: str = ""
     llm_base_url: str = ""
     llm_model_fast: str = ""

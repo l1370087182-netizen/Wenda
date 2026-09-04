@@ -1,47 +1,145 @@
-"""LLM / Embedding 封装：OpenAI 兼容 API + 模型分层 + 并发闸门"""
+"""LLM 层：OpenAI / Anthropic 双协议适配 + 用户自带配置（BYOK）
+
+URL 拼接规则（兼容火山方舟等非标准前缀）：
+- 以 `#` 结尾 → 去掉 # 后作为**完整端点**原样使用（万能逃生门）
+- 已以默认路径结尾 → 原样使用
+- 否则 → base_url + 默认路径（openai: /chat/completions，anthropic: /v1/messages）
+
+例（火山方舟 OpenAI 兼容前缀）：
+  base_url = https://ark.cn-beijing.volces.com/api/v3
+  → https://ark.cn-beijing.volces.com/api/v3/chat/completions
+
+例（任意特殊端点，如 /api/plan 系路径）：
+  base_url = https://ark.cn-beijing.volces.com/api/plan/chat/completions#
+  → 原样使用
+
+注意：Embedding 走系统配置（pgvector 中的向量必须与索引时同一模型，
+用户的对话模型配置不影响检索向量）。
+"""
 import asyncio
 import json
+import logging
+from dataclasses import dataclass, field
+from functools import lru_cache
 
+import httpx
 from openai import AsyncOpenAI
 
 from app.config import settings
 
-_sem = asyncio.Semaphore(settings.llm_concurrency)  # 全局并发闸门（2C2G / API 限流友好）
+logger = logging.getLogger(__name__)
 
-_client: AsyncOpenAI | None = None
-_embed_client: AsyncOpenAI | None = None
+_sem = asyncio.Semaphore(settings.llm_concurrency)  # 全局并发闸门
 
-
-def client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url or None)
-    return _client
+ANTHROPIC_VERSION = "2023-06-01"
+JSON_HINT = "\n\n只输出 JSON，不要输出任何其他内容。"
 
 
-def embed_client() -> AsyncOpenAI:
-    global _embed_client
-    if _embed_client is None:
-        _embed_client = AsyncOpenAI(
-            api_key=settings.embedding_api_key or settings.llm_api_key,
-            base_url=settings.embedding_base_url or settings.llm_base_url or None,
-        )
-    return _embed_client
+@dataclass
+class LLMConfig:
+    provider: str = "openai"        # openai / anthropic
+    base_url: str = ""
+    api_key: str = ""
+    model_fast: str = ""
+    model_strong: str = ""
+    label: str = "system"           # 来源标识（system / user）
+
+    def model(self, strong: bool) -> str:
+        m = self.model_strong if strong else self.model_fast
+        return m or self.model_strong or self.model_fast
 
 
-async def chat(messages: list[dict], *, strong: bool = False, json_mode: bool = False) -> str:
-    """单次对话补全。strong=True 走强模型，否则走轻量模型。"""
-    model = settings.llm_model_strong if strong else settings.llm_model_fast
+def system_llm_config() -> LLMConfig:
+    return LLMConfig(
+        provider=settings.llm_provider,
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model_fast=settings.llm_model_fast,
+        model_strong=settings.llm_model_strong,
+        label="system",
+    )
+
+
+def _endpoint(base_url: str, default_path: str) -> str:
+    """按头部规则拼接端点。"""
+    base = (base_url or "").strip()
+    if base.endswith("#"):
+        return base[:-1]
+    base = base.rstrip("/")
+    if base.endswith(default_path):
+        return base
+    return base + default_path
+
+
+# ============================== OpenAI 协议 ==============================
+
+_openai_clients: dict[tuple, AsyncOpenAI] = {}
+
+
+def _openai_client(cfg: LLMConfig) -> AsyncOpenAI:
+    key = (cfg.base_url, cfg.api_key)
+    if key not in _openai_clients:
+        _openai_clients[key] = AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.base_url or None)
+    return _openai_clients[key]
+
+
+async def _chat_openai(cfg: LLMConfig, messages: list[dict], model: str, json_mode: bool) -> str:
     kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
     async with _sem:
-        resp = await client().chat.completions.create(model=model, messages=messages, **kwargs)
+        resp = await _openai_client(cfg).chat.completions.create(
+            model=model, messages=messages, **kwargs
+        )
     return resp.choices[0].message.content or ""
 
 
-async def chat_json(messages: list[dict], *, strong: bool = False) -> dict:
+# ============================== Anthropic 协议 ==============================
+
+def _split_system(messages: list[dict]) -> tuple[str, list[dict]]:
+    """anthropic 的 system 是独立参数。"""
+    system_parts = [m["content"] for m in messages if m["role"] == "system"]
+    rest = [m for m in messages if m["role"] != "system"]
+    return "\n\n".join(system_parts), rest
+
+
+async def _chat_anthropic(cfg: LLMConfig, messages: list[dict], model: str, json_mode: bool) -> str:
+    system, rest = _split_system(messages)
+    if json_mode:
+        system += JSON_HINT
+    payload = {
+        "model": model,
+        "max_tokens": 4000,
+        "messages": rest,
+    }
+    if system:
+        payload["system"] = system
+    url = _endpoint(cfg.base_url, "/v1/messages")
+    headers = {"x-api-key": cfg.api_key, "anthropic-version": ANTHROPIC_VERSION}
+    async with _sem:
+        async with httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+    data = resp.json()
+    # 响应格式：{"content": [{"type": "text", "text": "..."}, ...]}
+    return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+
+
+# ============================== 对外接口 ==============================
+
+async def chat(messages: list[dict], *, strong: bool = False, json_mode: bool = False, cfg: LLMConfig | None = None) -> str:
+    """单次对话补全。cfg=None 时用系统配置。"""
+    c = cfg or system_llm_config()
+    if not c.api_key or not (c.model_fast or c.model_strong):
+        raise RuntimeError("LLM 未配置（api_key / model 为空）")
+    model = c.model(strong) or c.model_fast
+    if c.provider == "anthropic":
+        return await _chat_anthropic(c, messages, model, json_mode)
+    return await _chat_openai(c, messages, model, json_mode)
+
+
+async def chat_json(messages: list[dict], *, strong: bool = False, cfg: LLMConfig | None = None) -> dict:
     """强制 JSON 输出，解析失败重试一次。"""
     for attempt in range(2):
-        raw = await chat(messages, strong=strong, json_mode=True)
+        raw = await chat(messages, strong=strong, json_mode=True, cfg=cfg)
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
@@ -52,11 +150,31 @@ async def chat_json(messages: list[dict], *, strong: bool = False) -> dict:
 
 
 async def embed_texts(texts: list[str]) -> list[list[float]]:
-    """批量向量化（一次 API 调用）。"""
+    """批量向量化——始终走系统 Embedding 配置（向量须与索引同模型）。"""
     if not texts:
         return []
+    ec = settings.embedding_api_key or settings.llm_api_key
+    base = settings.embedding_base_url or settings.llm_base_url or None
+    key = (base, ec)
+    if key not in _openai_clients:
+        _openai_clients[key] = AsyncOpenAI(api_key=ec, base_url=base)
     async with _sem:
-        resp = await embed_client().embeddings.create(
+        resp = await _openai_clients[key].embeddings.create(
             model=settings.embedding_model, input=[t[:4000] for t in texts]
         )
     return [d.embedding for d in resp.data]
+
+
+async def test_config(cfg: LLMConfig) -> dict:
+    """连通性测试：ping 一次 fast 模型。返回 {ok, detail, latency_ms}。"""
+    import time
+
+    start = time.monotonic()
+    try:
+        reply = await chat(
+            [{"role": "user", "content": "回复一个字：好"}],
+            strong=False, cfg=cfg,
+        )
+        return {"ok": True, "detail": f"模型响应：{reply[:50]}", "latency_ms": int((time.monotonic() - start) * 1000)}
+    except Exception as e:
+        return {"ok": False, "detail": f"{type(e).__name__}: {e}", "latency_ms": int((time.monotonic() - start) * 1000)}

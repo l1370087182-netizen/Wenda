@@ -1,4 +1,4 @@
-"""SQLAlchemy 模型：9 张表（users / email_codes / sessions / articles / digests / send_logs / job_runs / chats / chat_messages）"""
+"""SQLAlchemy 模型：10 张表（users / email_codes / sessions / articles / digests / send_logs / job_runs / chats / chat_messages / user_llm_configs）"""
 import hashlib
 import uuid
 from datetime import date, datetime, timezone
@@ -183,3 +183,20 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     chat: Mapped[Chat] = relationship(back_populates="messages")
+
+
+class UserLLMConfig(Base):
+    """用户自带模型配置（BYOK）：问答走用户自己的 LLM；Embedding/检索始终走系统配置。"""
+
+    __tablename__ = "user_llm_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(16), default="openai")  # openai / anthropic
+    base_url: Mapped[str] = mapped_column(String(1024), default="")
+    api_key: Mapped[str] = mapped_column(String(512), default="")  # 只写不读（API 永不回传明文）
+    model_fast: Mapped[str] = mapped_column(String(128), default="")
+    model_strong: Mapped[str] = mapped_column(String(128), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

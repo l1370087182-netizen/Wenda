@@ -76,12 +76,14 @@ from app.api.admin import router as admin_router  # noqa: E402
 from app.api.auth import router as auth_router  # noqa: E402
 from app.api.chat import router as chat_router  # noqa: E402
 from app.api.dashboard import router as dashboard_router  # noqa: E402
+from app.api.llm_config import router as llm_config_router  # noqa: E402
 from app.api.skills import router as skills_router  # noqa: E402
 from app.api.tasks import router as tasks_router  # noqa: E402
 from app.api.users import router as users_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(users_router)
+app.include_router(llm_config_router)
 app.include_router(skills_router)
 app.include_router(dashboard_router)
 app.include_router(chat_router)

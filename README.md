@@ -51,7 +51,8 @@ SMTP_PORT=465
 SMTP_USER=
 SMTP_PASS=
 
-# LLM / Embedding（OpenAI 兼容 API）
+# LLM / Embedding（系统默认模型；provider 可选 openai / anthropic）
+LLM_PROVIDER=openai
 LLM_API_KEY=
 LLM_BASE_URL=
 LLM_MODEL_FAST=
@@ -67,6 +68,9 @@ REDIS_URL=redis://localhost:6379/0
 
 # 前端（开发期 Vite 独立服务器）
 CORS_ORIGINS=http://localhost:5173
+
+# MCP（管理工具鉴权，留空=管理工具禁用）
+MCP_ADMIN_TOKEN=
 ```
 
 注意：
@@ -88,7 +92,7 @@ CORS_ORIGINS=http://localhost:5173
 ## API 一览
 
 认证：`/api/auth/*`（send-code / register / login / logout / reset-password / me）
-用户：`PUT /api/users/me/settings`　看板：`GET /api/dashboard/top|insight|articles/{id}`
+用户：`PUT /api/users/me/settings`　BYOK：`GET/PUT/DELETE /api/users/me/llm-config`（+ `/test` 连通性测试）　看板：`GET /api/dashboard/top|insight|articles/{id}`
 问答：`POST /api/chat`、`GET /api/chats[/{id}]`　任务：`GET /api/tasks/status`
 管理：`GET /api/admin/users`、`POST /api/tasks/run|send`
 

@@ -50,11 +50,18 @@ async def chat(
     db.add(ChatMessage(chat_id=chat_row.id, user_id=user.id, role="user", content=body.question))
     await db.commit()
 
-    # 多步研究 Agent（步骤8实现）
+    # 多步研究 Agent（用户自带 LLM 配置优先，无则走系统配置）
+    from app.models import UserLLMConfig
     from app.services.graph import run_chat
+    from app.api.llm_config import _to_service_cfg
+
+    cfg = None
+    llm_row = await db.scalar(select(UserLLMConfig).where(UserLLMConfig.user_id == user.id))
+    if llm_row:
+        cfg = _to_service_cfg(llm_row)
 
     try:
-        result = await run_chat(db, question=body.question, history=history)
+        result = await run_chat(db, question=body.question, history=history, cfg=cfg)
     except Exception as e:  # 编排失败也要给用户反馈
         answer = f"抱歉，问答服务暂时不可用（{type(e).__name__}），请稍后重试。"
         result = {"answer": answer, "sources": []}

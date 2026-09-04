@@ -484,10 +484,11 @@ def _route_messages(question: str) -> list[dict]:
     ]
 
 
-async def run_chat(db: AsyncSession, *, question: str, history: list[dict]) -> dict:
-    """研究问答入口：路由（含技能匹配）→ 单轮快速通道 / 研究 Agent。返回 {answer, sources}。"""
+async def run_chat(db: AsyncSession, *, question: str, history: list[dict], cfg=None) -> dict:
+    """研究问答入口：路由（含技能匹配）→ 单轮快速通道 / 研究 Agent。返回 {answer, sources}。
+    cfg：用户自带 LLM 配置（BYOK），None 时用系统配置。"""
     try:
-        route = await llm.chat_json(_route_messages(question))
+        route = await llm.chat_json(_route_messages(question), cfg=cfg)
         qtype = route.get("type", "factual")
     except Exception:
         qtype = "factual"
@@ -503,16 +504,16 @@ async def run_chat(db: AsyncSession, *, question: str, history: list[dict]) -> d
             logger.warning("路由返回未知技能：%s", skill_name)
 
     if qtype == "factual":
-        result = await _quick_answer(question, history, skill_body=skill_body)
+        result = await _quick_answer(question, history, skill_body=skill_body, cfg=cfg)
     else:
-        result = await _research_answer(question, history, skill_body=skill_body)
+        result = await _research_answer(question, history, skill_body=skill_body, cfg=cfg)
     result["skill"] = skill_name if (skill_name and skill_name != "null") else None
     return result
 
 
-async def _quick_answer(question: str, history: list[dict], *, skill_body: str | None = None) -> dict:
+async def _quick_answer(question: str, history: list[dict], *, skill_body: str | None = None, cfg=None) -> dict:
     articles = await _search_articles(question)
-    return await _synthesize(question, history, articles, strong=False, skill_body=skill_body)
+    return await _synthesize(question, history, articles, strong=False, skill_body=skill_body, cfg=cfg)
 
 
 async def _search_articles(query: str) -> list[Article]:
@@ -524,7 +525,7 @@ async def _search_articles(query: str) -> list[Article]:
             return []
 
 
-async def _research_answer(question: str, history: list[dict], *, skill_body: str | None = None) -> dict:
+async def _research_answer(question: str, history: list[dict], *, skill_body: str | None = None, cfg=None) -> dict:
     """研究 Agent：拆解子问题 → 并行检索 → 证据自检（≤2 轮补充）→ 综合。"""
     # 1) 规划（命中技能时，按技能流程规划检索）
     plan_system = (
@@ -537,7 +538,7 @@ async def _research_answer(question: str, history: list[dict], *, skill_body: st
         plan = await llm.chat_json([
             {"role": "system", "content": plan_system},
             {"role": "user", "content": question},
-        ], strong=True)
+        ], strong=True, cfg=cfg)
         subqs = plan.get("subquestions", [])[: settings.rag_max_subquestions] or [question]
     except Exception:
         subqs = [question]
@@ -570,11 +571,11 @@ async def _research_answer(question: str, history: list[dict], *, skill_body: st
         except Exception:
             break
 
-    return await _synthesize(question, history, list(articles.values()), strong=True, skill_body=skill_body)
+    return await _synthesize(question, history, list(articles.values()), strong=True, skill_body=skill_body, cfg=cfg)
 
 
 async def _synthesize(
-    question: str, history: list[dict], articles: list[Article], *, strong: bool, skill_body: str | None = None
+    question: str, history: list[dict], articles: list[Article], *, strong: bool, skill_body: str | None = None, cfg=None
 ) -> dict:
     """综合作答：带编号引用；命中技能时按技能输出规范作答。"""
     context = "\n\n".join(
@@ -593,7 +594,7 @@ async def _synthesize(
         {"role": "user", "content": f"参考资料：\n{context or '（未检索到相关资讯）'}\n\n问题：{question}"},
     ]
     try:
-        answer = await llm.chat(msgs, strong=strong)
+        answer = await llm.chat(msgs, strong=strong, cfg=cfg)
     except Exception as e:
         answer = f"抱歉，问答服务暂时不可用（{type(e).__name__}）。若持续出现，请联系管理员检查 LLM API 配置。"
     sources = [{"article_id": a.id, "title": a.title, "url": a.url} for a in articles]
