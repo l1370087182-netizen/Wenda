@@ -1,5 +1,15 @@
-# 生产部署：2C2G 单机（app + postgres(pgvector) + redis）
+# 生产部署：2C2G 单机（frontend nginx + app 纯 API + postgres(pgvector) + redis）
+# 前后端分离：对外只暴露前端容器（nginx 托管静态文件并反代 /api、/mcp），后端仅内网可达
 services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "8000:80"   # http://服务器IP:8000 直接访问
+    depends_on:
+      - app
+    mem_limit: 64m
+    restart: unless-stopped
+
   app:
     build: .
     env_file: .env
@@ -7,8 +17,9 @@ services:
       # 容器内连接服务名（覆盖 .env 中的 localhost）
       DATABASE_URL: postgresql+asyncpg://news:news@postgres:5432/news
       REDIS_URL: redis://redis:6379/0
-    ports:
-      - "8000:8000"
+    # 不对外暴露端口：仅前端 nginx 反代访问
+    expose:
+      - "8000"
     mem_limit: 1g
     depends_on:
       postgres:

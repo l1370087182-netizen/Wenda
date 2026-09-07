@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   { path: '/auth', component: () => import('./views/AuthView.vue') },
@@ -6,9 +6,10 @@ const routes = [
   { path: '/dashboard', component: () => import('./views/DashboardView.vue') },
   { path: '/chat', component: () => import('./views/ChatView.vue') },
   { path: '/settings', component: () => import('./views/SettingsView.vue') },
+  { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
 ]
 
 export default createRouter({
-  history: createWebHashHistory(),
+  history: createWebHistory(),
   routes,
 })

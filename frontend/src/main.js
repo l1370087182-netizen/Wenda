@@ -1,8 +1,13 @@
 import { createApp } from 'vue'
-import ElementPlus from 'element-plus'
-import 'element-plus/dist/index.css'
-import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import App from './App.vue'
 import router from './router'
+import './styles/tokens.css'
+import './styles/base.css'
 
-createApp(App).use(router).use(ElementPlus, { locale: zhCn }).mount('#app')
+// 主题先于挂载应用，避免闪白（保存值 > 系统偏好）
+const saved = localStorage.getItem('wenda-theme')
+if (saved === 'dark' || (!saved && matchMedia('(prefers-color-scheme: dark)').matches)) {
+  document.documentElement.dataset.theme = 'dark'
+}
+
+createApp(App).use(router).mount('#app')

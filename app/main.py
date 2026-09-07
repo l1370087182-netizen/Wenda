@@ -1,9 +1,8 @@
-"""FastAPI 入口：API 路由 + APScheduler 生命周期"""
+"""FastAPI 入口：API 路由 + APScheduler 生命周期（纯 API，前端由独立 nginx 容器部署）"""
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.services.db import SessionFactory, engine, init_db
@@ -51,7 +50,7 @@ app.add_middleware(
 
 
 class MCPPathFixMiddleware:
-    """/mcp（无尾斜杠）会被后面的 "/" 静态挂载吞掉；统一重写为 /mcp/ 使其命中 MCP 挂载。"""
+    """/mcp（无尾斜杠）命中不了 Mount（Starlette 1.6 Mount 不匹配空余路径）→ 404/405；统一重写为 /mcp/ 使其命中 MCP 挂载。"""
 
     def __init__(self, app):
         self.app = app
@@ -93,14 +92,7 @@ app.include_router(tasks_router)
 app.include_router(admin_router)
 
 
-# MCP Server：系统能力暴露给 AI 客户端（必须先于 "/" 静态挂载，否则会被吞掉）
+# MCP Server：系统能力暴露给 AI 客户端
 from app.mcp_server import mcp_asgi  # noqa: E402
 
 app.mount("/mcp", mcp_asgi, name="mcp")
-
-# 前端：前后端分离（frontend/ Vue3 工程），生产构建产物 frontend/dist 由后端同源托管
-from pathlib import Path  # noqa: E402
-
-_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-if _dist.exists():
-    app.mount("/", StaticFiles(directory=_dist, html=True), name="frontend")

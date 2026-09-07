@@ -1,0 +1,73 @@
+/* ============================================================
+   闻达设计令牌 —— 浅色为基准，[data-theme=dark] 全量覆盖
+   ============================================================ */
+:root {
+  color-scheme: light;
+
+  --bg: #f5f6f8;
+  --bg-soft: #eef0f4;
+  --card: #ffffff;
+  --card-2: #fafbfd;
+
+  --ink: #171923;
+  --ink-2: #4b5160;
+  --ink-3: #8a90a0;
+
+  --line: #e7e9ef;
+  --line-2: #dcdfe8;
+
+  --brand: #4f46e5;
+  --brand-2: #6366f1;
+  --brand-soft: #eef0fe;
+  --grad-brand: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+
+  --green: #16a34a;
+  --green-soft: #e8f7ee;
+  --red: #dc2626;
+  --red-soft: #fdecec;
+  --amber: #d97706;
+  --amber-soft: #fdf3e3;
+
+  --radius: 12px;
+  --radius-lg: 16px;
+
+  --shadow-sm: 0 1px 2px rgba(23, 25, 35, 0.05);
+  --shadow: 0 2px 10px rgba(23, 25, 35, 0.06);
+  --shadow-lg: 0 12px 32px rgba(23, 25, 35, 0.10);
+
+  --sidebar-bg: #ffffff;
+  --font-num: "Segoe UI", system-ui, sans-serif;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0f1117;
+  --bg-soft: #151824;
+  --card: #171a24;
+  --card-2: #1c202c;
+
+  --ink: #eceef4;
+  --ink-2: #b6bac8;
+  --ink-3: #7c8194;
+
+  --line: #262b3a;
+  --line-2: #303648;
+
+  --brand: #818cf8;
+  --brand-2: #a5b4fc;
+  --brand-soft: #232641;
+
+  --green: #34d399;
+  --green-soft: #12271d;
+  --red: #f87171;
+  --red-soft: #2e1717;
+  --amber: #fbbf24;
+  --amber-soft: #2a2013;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+
+  --sidebar-bg: #12141c;
+}

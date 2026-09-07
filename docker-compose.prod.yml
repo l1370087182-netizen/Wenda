@@ -1,7 +1,20 @@
 # 生产部署（2G 内存服务器，与已有项目共存版）
 # 相比 docker-compose.yml：压低内存限流 + 对外端口 8100（避开常用端口，不占 80/443）
 # 前置：建议先加 2G swap 防止 OOM（见 README）
+# 镜像本地构建好后 docker load 进来（小内存服务器构建会 OOM）：
+#   docker compose -f docker-compose.prod.yml build app frontend
+#   docker compose -f docker-compose.prod.yml save app frontend | gzip > wenda-images.tar.gz
 services:
+  frontend:
+    build: ./frontend
+    image: wenda-frontend:latest   # 本地构建好 docker load 进来后，up 不再触发服务器端构建
+    ports:
+      - "8100:80"   # http://服务器IP:8100 直接访问
+    depends_on:
+      - app
+    mem_limit: 48m
+    restart: unless-stopped
+
   app:
     build: .
     image: wenda:latest   # 本地构建好 docker load 进来后，up 不再触发服务器端构建（小内存服务器构建会 OOM）
@@ -9,8 +22,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://news:news@postgres:5432/news
       REDIS_URL: redis://redis:6379/0
-    ports:
-      - "8100:8000"   # http://服务器IP:8100 直接访问
+    # 不对外暴露端口：仅前端 nginx 反代访问
+    expose:
+      - "8000"
     mem_limit: 512m
     depends_on:
       postgres:

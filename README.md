@@ -6,7 +6,9 @@
 
 ## 技术栈
 
-FastAPI · SQLAlchemy(async) · PostgreSQL(pgvector) · Redis（LangGraph 检查点）· APScheduler · LangGraph（多 Agent）· Agent Skills · Vue 3 + Element Plus + ECharts
+FastAPI · SQLAlchemy(async) · PostgreSQL(pgvector) · Redis（LangGraph 检查点）· APScheduler · LangGraph（多 Agent）· Agent Skills · Vue 3（全手写设计系统，深/浅双主题）+ ECharts
+
+前后端分离：`frontend/` 为独立 Vue 3 工程，生产部署为独立 nginx 容器（托管静态文件 + 反代 `/api`、`/mcp`），后端为纯 API，仅内网可达。
 
 ## 本地开发（Windows）
 
@@ -18,12 +20,12 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8100 --workers 1   # 8000 在 
 # 前端（独立工程，开发期热更新）
 cd frontend
 npm install
-npm run dev        # http://localhost:5173，/api 代理到 8100
+npm run dev        # http://localhost:5173，/api 代理到 8100（VITE_API_TARGET 可覆盖）
 ```
 
-生产/演示可直接构建后由后端同源托管：`cd frontend && npm run build`，然后访问 http://localhost:8100
-
 ## 生产部署（2C2G 服务器）
+
+四个容器：`frontend`（nginx，对外 8000 端口）→ `app`（纯 API，仅内网）+ `postgres` + `redis`。
 
 ```bash
 # 1. 配置 .env（含管理员账号、SMTP、LLM Key）
@@ -32,7 +34,17 @@ sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile \
   && sudo mkswap /swapfile && sudo swapon /swapfile
 
 # 3. 构建启动
-docker compose up -d --build
+docker compose up -d --build        # 标准版（对外 8000）
+# 或 2G 内存共存版（对外 8100，限流更紧）：
+docker compose -f docker-compose.prod.yml up -d
+```
+
+小内存服务器免构建部署（本地构建镜像后传上去）：
+
+```bash
+docker compose -f docker-compose.prod.yml build app frontend
+docker compose -f docker-compose.prod.yml save app frontend | gzip > wenda-images.tar.gz
+# 上传后：gunzip -c wenda-images.tar.gz | docker load && docker compose -f docker-compose.prod.yml up -d
 ```
 
 ## 环境变量（项目根目录创建 `.env`，运行时读取）
