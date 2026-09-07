@@ -1,0 +1,48 @@
+# 生产部署（2G 内存服务器，与已有项目共存版）
+# 相比 docker-compose.yml：压低内存限流 + 对外端口 8100（避开常用端口，不占 80/443）
+# 前置：建议先加 2G swap 防止 OOM（见 README）
+services:
+  app:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://news:news@postgres:5432/news
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8100:8000"   # http://服务器IP:8100 直接访问
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: news
+      POSTGRES_PASSWORD: news
+      POSTGRES_DB: news
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=50"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U news"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redisdata:/data
+    mem_limit: 48m
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
