@@ -6,8 +6,10 @@ WORKDIR /srv/app
 ENV UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 先装依赖（利用层缓存）
+# uv.lock 锁的是 files.pythonhosted.org 原始地址（境内极慢），构建时改写为阿里云镜像（同一文件、hash 校验不受影响）；境外部署可删这行 sed
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project
+RUN sed -i 's|https://files.pythonhosted.org|https://mirrors.aliyun.com/pypi|g' uv.lock \
+    && uv sync --frozen --no-install-project
 
 # 拷贝应用
 COPY app ./app
