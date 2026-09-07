@@ -4,6 +4,7 @@
 services:
   app:
     build: .
+    image: wenda:latest   # 本地构建好 docker load 进来后，up 不再触发服务器端构建（小内存服务器构建会 OOM）
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://news:news@postgres:5432/news
