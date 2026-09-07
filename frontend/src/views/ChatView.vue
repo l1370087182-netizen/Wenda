@@ -35,8 +35,8 @@
           </div>
         </div>
       </div>
-      <el-form class="input-row" @submit.prevent="send">
-        <el-input v-model="question" placeholder="问点什么…" size="large" :disabled="busy" />
+      <el-form class="input-row" autocomplete="off" @submit.prevent="send">
+        <el-input v-model="question" placeholder="问点什么…" size="large" :disabled="busy" autocomplete="off" />
         <el-button type="primary" size="large" native-type="submit" :loading="busy">发送</el-button>
       </el-form>
     </el-card>
@@ -106,26 +106,26 @@ onMounted(() => { loadChats(); loadSkills() })
 </script>
 
 <style scoped>
-.chat-layout { display: grid; grid-template-columns: 260px 1fr; gap: 12px; height: calc(100vh - 120px); }
+.chat-layout { display: grid; grid-template-columns: 260px 1fr; gap: 14px; height: calc(100vh - 150px); }
 .side { overflow-y: auto; }
 .chat-list { margin-top: 10px; }
-.chat-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; color: #444; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-item.active, .chat-item:hover { background: #e8f0fe; }
+.chat-item { padding: 8px 12px; border-radius: 999px; cursor: pointer; font-size: 13px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background 0.15s; }
+.chat-item.active, .chat-item:hover { background: var(--brand-soft); color: var(--brand); }
 .skills { display: flex; flex-wrap: wrap; gap: 6px; }
-.skill-tag { cursor: default; }
+.skill-tag { cursor: default; border-radius: 999px; }
 .main { display: flex; flex-direction: column; }
 .messages { flex: 1; overflow-y: auto; padding: 4px; }
-.bubble-row { display: flex; margin-bottom: 10px; }
+.bubble-row { display: flex; margin-bottom: 12px; }
 .bubble-row.user { justify-content: flex-end; }
-.bubble { max-width: 78%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.6; }
-.bubble-row.user .bubble { background: #1a73e8; color: #fff; }
-.bubble-row.assistant .bubble { background: #f1f3f4; }
-.skill-badge { margin-bottom: 6px; }
+.bubble { max-width: 78%; padding: 10px 16px; border-radius: 16px; font-size: 14px; line-height: 1.65; }
+.bubble-row.user .bubble { background: var(--brand); color: #fff; border-bottom-right-radius: 4px; }
+.bubble-row.assistant .bubble { background: var(--bg); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.skill-badge { margin-bottom: 6px; border-radius: 999px; }
 .content { white-space: pre-wrap; word-break: break-word; }
 .sources { margin-top: 8px; font-size: 12px; }
-.sources a { color: #1a73e8; margin-right: 10px; }
-.bubble-row.user .sources a { color: #cfe2ff; }
-.input-row { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid #eee; }
-.muted { color: #999; font-size: 12px; }
+.sources a { color: var(--brand); margin-right: 10px; }
+.bubble-row.user .sources a { color: #dbe4ff; }
+.input-row { display: flex; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.muted { color: var(--ink-3); font-size: 12px; }
 @media (max-width: 768px) { .chat-layout { grid-template-columns: 1fr; } .side { display: none; } }
 </style>

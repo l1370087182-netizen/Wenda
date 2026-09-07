@@ -123,7 +123,12 @@ async def _chat_anthropic(cfg: LLMConfig, messages: list[dict], model: str, json
     if system:
         payload["system"] = system
     url = _endpoint(cfg.base_url, "/v1/messages")
-    headers = {"x-api-key": cfg.api_key, "anthropic-version": ANTHROPIC_VERSION}
+    # 双头兼容：官方走 x-api-key，火山方舟/Claude Code 生态网关（cc-switch 等）走 Authorization Bearer
+    headers = {
+        "x-api-key": cfg.api_key,
+        "Authorization": f"Bearer {cfg.api_key}",
+        "anthropic-version": ANTHROPIC_VERSION,
+    }
     async with _sem:
         async with httpx.AsyncClient(timeout=90) as client:
             resp = await client.post(url, headers=headers, json=payload)

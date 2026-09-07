@@ -13,15 +13,15 @@ FastAPI · SQLAlchemy(async) · PostgreSQL(pgvector) · Redis（LangGraph 检查
 ```bash
 # 后端
 docker compose -f docker-compose.dev.yml up -d   # postgres + redis（需先启动 Docker Desktop）
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8100 --workers 1   # 8000 在 Windows 上常被系统保留段占用，故用 8100
 
 # 前端（独立工程，开发期热更新）
 cd frontend
 npm install
-npm run dev        # http://localhost:5173，/api 代理到 8000
+npm run dev        # http://localhost:5173，/api 代理到 8100
 ```
 
-生产/演示可直接构建后由后端同源托管：`cd frontend && npm run build`，然后访问 http://localhost:8000
+生产/演示可直接构建后由后端同源托管：`cd frontend && npm run build`，然后访问 http://localhost:8100
 
 ## 生产部署（2C2G 服务器）
 

@@ -1,4 +1,4 @@
-"""SQLAlchemy 模型：10 张表（users / email_codes / sessions / articles / digests / send_logs / job_runs / chats / chat_messages / user_llm_configs）"""
+"""SQLAlchemy 模型：11 张表（users / email_codes / sessions / articles / digests / send_logs / job_runs / chats / chat_messages / favorites / user_llm_configs）"""
 import hashlib
 import uuid
 from datetime import date, datetime, timezone
@@ -183,6 +183,19 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     chat: Mapped[Chat] = relationship(back_populates="messages")
+
+
+class Favorite(Base):
+    """用户收藏：每个用户对文章的收藏状态（登录用户即可用，无角色限制）。"""
+
+    __tablename__ = "favorites"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("user_id", "article_id", name="uq_favorites_user_article"),)
 
 
 class UserLLMConfig(Base):

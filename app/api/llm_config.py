@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db, get_current_user
 from app.models import User, UserLLMConfig
-from app.services.llm import LLMConfig, system_llm_config, test_config
+from app.services.llm import LLMConfig, test_config
 
 router = APIRouter(prefix="/api/users/me/llm-config", tags=["llm-config"])
 
@@ -26,18 +26,18 @@ def _mask(key: str) -> str:
 
 
 def _cfg_out(row: UserLLMConfig | None) -> dict:
+    """平台不再提供默认模型：未配置时 configured=False，不回显任何系统配置。"""
     if row is None:
-        s = system_llm_config()
         return {
-            "using_system": True,
-            "provider": s.provider,
-            "base_url": s.base_url,
-            "api_key_masked": _mask(s.api_key),
-            "model_fast": s.model_fast,
-            "model_strong": s.model_strong,
+            "configured": False,
+            "provider": "openai",
+            "base_url": "",
+            "api_key_masked": "",
+            "model_fast": "",
+            "model_strong": "",
         }
     return {
-        "using_system": False,
+        "configured": True,
         "provider": row.provider,
         "base_url": row.base_url,
         "api_key_masked": _mask(row.api_key),
@@ -61,7 +61,7 @@ def _to_service_cfg(row: UserLLMConfig) -> LLMConfig:
 
 @router.get("")
 async def get_config(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """当前生效配置（api_key 只回掩码；未配置时返回系统默认）。"""
+    """当前配置（api_key 只回掩码；未配置时 configured=False）。"""
     return _cfg_out(await _get_row(db, user.id))
 
 
@@ -70,8 +70,8 @@ async def save_config(body: LLMConfigIn, user: User = Depends(get_current_user),
     if not body.model_fast and not body.model_strong:
         raise HTTPException(400, "至少填写一个模型名（model_fast 或 model_strong）")
     row = await _get_row(db, user.id)
-    # api_key 留空/掩码 = 保留旧值
-    effective_key = body.api_key
+    # api_key 留空/掩码 = 保留旧值（strip 防止粘贴带入空格/换行导致 401）
+    effective_key = body.api_key.strip()
     if not effective_key or "****" in effective_key:
         if row is None:
             raise HTTPException(400, "api_key 为空且无已保存配置")
@@ -101,7 +101,7 @@ async def save_config(body: LLMConfigIn, user: User = Depends(get_current_user),
 
 @router.delete("")
 async def clear_config(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """清除自带配置，回退系统默认。"""
+    """清除自带配置（清除后问答不可用，直到重新配置）。"""
     row = await _get_row(db, user.id)
     if row:
         await db.delete(row)
@@ -116,7 +116,7 @@ class TestIn(LLMConfigIn):
 @router.post("/test")
 async def test(body: TestIn, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     saved = await _get_row(db, user.id)
-    api_key = body.api_key
+    api_key = body.api_key.strip()
     if not api_key or "****" in api_key:
         if saved is None:
             raise HTTPException(400, "api_key 为空且无已保存配置")

@@ -22,9 +22,10 @@ class ArticleItem(BaseModel):
     hot_score: float | None
     importance_score: float | None
     summary: str
+    favorited: bool = False
 
 
-def _item(a: Article) -> ArticleItem:
+def _item(a: Article, favorited: bool = False) -> ArticleItem:
     return ArticleItem(
         id=a.id,
         category=a.category,
@@ -35,6 +36,7 @@ def _item(a: Article) -> ArticleItem:
         hot_score=a.hot_score,
         importance_score=a.importance_score,
         summary=a.summary or "",
+        favorited=favorited,
     )
 
 
@@ -57,9 +59,13 @@ async def top_articles(
     )
 
     result: dict = {"date": day.isoformat(), "categories": {}}
+    # 当前用户的收藏集合（用于前端星星点亮状态）
+    from app.api.favorites import _fav_article_ids
+
     if category:
         rows = (await db.scalars(stmt.limit(limit))).all()
-        result["categories"][category] = [_item(a) for a in rows]
+        favs = await _fav_article_ids(db, user.id, [a.id for a in rows])
+        result["categories"][category] = [_item(a, a.id in favs) for a in rows]
         return result
 
     # 全部六类：一次查询按分类取 TopN（窗口函数）
@@ -83,6 +89,10 @@ async def top_articles(
     ).all()
     for a in rows:
         result["categories"].setdefault(a.category, []).append(_item(a))
+    favs = await _fav_article_ids(db, user.id, [a.id for a in rows])
+    for items in result["categories"].values():
+        for it in items:
+            it.favorited = it.id in favs
     return result
 
 
