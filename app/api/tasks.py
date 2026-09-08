@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import business_today
 from app.core.deps import get_db, get_current_user, require_admin
 from app.models import JobRun, User
 
@@ -19,7 +20,7 @@ async def task_status(
     db: AsyncSession = Depends(get_db),
 ):
     """最近 N 天各任务运行状态。"""
-    since = date.today() - timedelta(days=days)
+    since = business_today() - timedelta(days=days)
     rows = (await db.scalars(
         select(JobRun).where(JobRun.date >= since).order_by(JobRun.id.desc()).limit(100)
     )).all()
@@ -51,7 +52,7 @@ async def rerun(
 
     from app.services.graph import run_daily
 
-    target = _date.fromisoformat(body.date) if body and body.date else _date.today()
+    target = _date.fromisoformat(body.date) if body and body.date else business_today()
     try:
         job_run = await run_daily(target)
     except Exception as e:
@@ -72,7 +73,7 @@ async def resend(
     """管理员手动补发当日日报（重跑采集成功后调用）。"""
     from app.services.scheduler import job_send_daily
 
-    target = date.fromisoformat(body.date) if body and body.date else date.today()
+    target = date.fromisoformat(body.date) if body and body.date else business_today()
     try:
         await job_send_daily(target)
     except Exception as e:

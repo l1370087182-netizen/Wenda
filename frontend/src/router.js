@@ -6,6 +6,7 @@ const routes = [
   { path: '/dashboard', component: () => import('./views/DashboardView.vue') },
   { path: '/chat', component: () => import('./views/ChatView.vue') },
   { path: '/settings', component: () => import('./views/SettingsView.vue') },
+  { path: '/admin', component: () => import('./views/AdminView.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
 ]
 

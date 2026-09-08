@@ -1,4 +1,4 @@
-"""SQLAlchemy 模型：11 张表（users / email_codes / sessions / articles / digests / send_logs / job_runs / chats / chat_messages / favorites / user_llm_configs）"""
+"""SQLAlchemy 模型：12 张表（users / email_codes / sessions / articles / digests / send_logs / job_runs / agent_traces / chats / chat_messages / favorites / user_llm_configs）"""
 import hashlib
 import uuid
 from datetime import date, datetime, timezone
@@ -22,7 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.config import settings
+from app.config import business_today, settings
 
 
 class Base(DeclarativeBase):
@@ -104,7 +104,7 @@ class Article(Base):
     source: Mapped[str] = mapped_column(String(255), default="")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    batch_date: Mapped[date] = mapped_column(Date, index=True, default=date.today)  # 所属日报日期
+    batch_date: Mapped[date] = mapped_column(Date, index=True, default=business_today)  # 所属日报日期
     hot_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     importance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     summary: Mapped[str] = mapped_column(Text, default="")
@@ -153,6 +153,31 @@ class JobRun(Base):
     error: Mapped[str] = mapped_column(Text, default="")  # 失败原因（支撑邮件友好提示）
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AgentTrace(Base):
+    """多 Agent 运行轨迹：一条 = 某 agent 的一步（一次 LLM 决策 / 一个工具调用 / 一条编排决策）。
+
+    run_id 把同一次运行的所有轨迹串起来（如 collect-2026-09-08），供管理后台"Agent 轨迹"可视化。
+    由 services/graph.py 在运行中写入内存 buffer、流水线收尾时批量落库（避免并发共用 AsyncSession）。
+    """
+
+    __tablename__ = "agent_traces"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)          # collect-<date> / chat-<uuid>
+    run_kind: Mapped[str] = mapped_column(String(16), default="daily")   # daily / chat
+    agent_name: Mapped[str] = mapped_column(String(64), index=True)      # supervisor / collect:geo / research …
+    step: Mapped[int] = mapped_column(Integer, default=0)                # agent 内步序
+    kind: Mapped[str] = mapped_column(String(16), default="tool")        # tool / decision / answer
+    tool_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    input: Mapped[str] = mapped_column(Text, default="")                 # 工具入参 / 决策依据（截断）
+    output: Mapped[str] = mapped_column(Text, default="")                # 工具结果 / 终答（截断）
+    model_tier: Mapped[str] = mapped_column(String(8), default="")       # fast / strong / ""（无 LLM）
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_agent_traces_run_agent", "run_id", "agent_name", "step"),)
 
 
 class Chat(Base):

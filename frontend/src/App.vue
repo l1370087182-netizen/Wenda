@@ -51,7 +51,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from './api'
 import { store } from './store'
@@ -67,11 +67,18 @@ const router = useRouter()
 const { theme, toggle } = useTheme()
 const booting = ref(true)
 
-const navItems = [
-  { path: '/dashboard', icon: 'dashboard', label: '资讯看板' },
-  { path: '/chat', icon: 'chat', label: '深度问答' },
-  { path: '/settings', icon: 'settings', label: '个人设置' },
-]
+const navItems = computed(() => {
+  const items = [
+    { path: '/dashboard', icon: 'dashboard', label: '资讯看板' },
+    { path: '/chat', icon: 'chat', label: '深度问答' },
+    { path: '/settings', icon: 'settings', label: '个人设置' },
+  ]
+  // 管理员专属入口（后端每个 /api/admin 接口另有 require_admin 兜底）
+  if ((store.user?.role || '').toLowerCase() === 'admin') {
+    items.splice(2, 0, { path: '/admin', icon: 'shield', label: '管理后台' })
+  }
+  return items
+})
 
 onMounted(async () => {
   try {

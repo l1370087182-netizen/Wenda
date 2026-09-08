@@ -1,5 +1,7 @@
 """应用配置：pydantic-settings 读取 .env"""
+from datetime import date, datetime
 from functools import lru_cache
+from zoneinfo import ZoneInfo
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -17,7 +19,7 @@ class Settings(BaseSettings):
 
     # ---- 定时任务 ----
     timezone: str = "Asia/Shanghai"
-    collect_hour: int = 7         # 采集 Job
+    collect_hour: int = 1         # 采集 Job（凌晨）
     send_hour: int = 8            # 发送 Job
     llm_concurrency: int = 8      # LLM 调用并发闸门
 
@@ -56,6 +58,7 @@ class Settings(BaseSettings):
     # ---- RAG ----
     rag_top_k: int = 6                    # 每个子问题检索条数
     rag_max_subquestions: int = 4         # 研究 Agent 最多拆解子问题数
+    rag_selfcheck_rounds: int = 2         # 研究 Agent 证据自检最多补充检索轮数（代码内再 clamp ≤3）
     dedup_similarity_threshold: float = 0.95  # 语义去重相似度阈值
 
 
@@ -65,3 +68,13 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def business_today() -> date:
+    """业务日期：按调度时区取当前日期。
+
+    容器时区通常是 UTC，直接用 date.today() 会在北京时间 0:00–8:00 之间
+    与调度日期错位一天——采集（07:00）把 digest 记到昨天，发送（08:00）查
+    今天则查空，静默跳过发信。
+    """
+    return datetime.now(ZoneInfo(settings.timezone)).date()

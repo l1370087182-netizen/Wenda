@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import business_today
 from app.core.deps import get_db, get_current_user, touch_activity
 from app.models import Article, Digest, INSIGHT_SLUG, User
 
@@ -49,7 +50,7 @@ async def top_articles(
     db: AsyncSession = Depends(get_db),
 ):
     await touch_activity(user, db)
-    day = date.fromisoformat(date_str) if date_str else date.today() - timedelta(days=1)
+    day = date.fromisoformat(date_str) if date_str else business_today() - timedelta(days=1)
 
     stmt = select(Article).where(Article.batch_date == day)
     if category:
@@ -104,7 +105,7 @@ async def today_insight(
 ):
     """当日跨类关联洞察（digests 中 category=insight 的行）。"""
     await touch_activity(user, db)
-    day = date.fromisoformat(date_str) if date_str else date.today() - timedelta(days=1)
+    day = date.fromisoformat(date_str) if date_str else business_today() - timedelta(days=1)
     row = (
         await db.scalars(
             select(Digest).where(Digest.category == INSIGHT_SLUG, Digest.date == day)

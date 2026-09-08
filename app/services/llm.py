@@ -19,6 +19,7 @@ URL 拼接规则（兼容火山方舟等非标准前缀）：
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 
@@ -111,6 +112,40 @@ def _split_system(messages: list[dict]) -> tuple[str, list[dict]]:
     return "\n\n".join(system_parts), rest
 
 
+def _anthropic_headers(cfg: LLMConfig) -> dict:
+    # 双头兼容：官方走 x-api-key，火山方舟/Claude Code 生态网关（cc-switch 等）走 Authorization Bearer
+    return {
+        "x-api-key": cfg.api_key,
+        "Authorization": f"Bearer {cfg.api_key}",
+        "anthropic-version": ANTHROPIC_VERSION,
+    }
+
+
+async def _anthropic_post(url: str, headers: dict, payload: dict, *, retries: int = 2) -> dict:
+    """POST /v1/messages，带指数退避重试。
+
+    429 / 5xx / 网络错误重试；其余 4xx（鉴权、参数错）直接抛，不浪费重试。
+    """
+    last: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            async with _sem:
+                async with httpx.AsyncClient(timeout=90) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+                    resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            if 400 <= status < 500 and status != 429:
+                raise
+            last = e
+        except httpx.TransportError as e:
+            last = e
+        if attempt < retries:
+            await asyncio.sleep(1.5 ** attempt)
+    raise last  # type: ignore[misc]
+
+
 async def _chat_anthropic(cfg: LLMConfig, messages: list[dict], model: str, json_mode: bool) -> str:
     system, rest = _split_system(messages)
     if json_mode:
@@ -123,19 +158,206 @@ async def _chat_anthropic(cfg: LLMConfig, messages: list[dict], model: str, json
     if system:
         payload["system"] = system
     url = _endpoint(cfg.base_url, "/v1/messages")
-    # 双头兼容：官方走 x-api-key，火山方舟/Claude Code 生态网关（cc-switch 等）走 Authorization Bearer
-    headers = {
-        "x-api-key": cfg.api_key,
-        "Authorization": f"Bearer {cfg.api_key}",
-        "anthropic-version": ANTHROPIC_VERSION,
-    }
-    async with _sem:
-        async with httpx.AsyncClient(timeout=90) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
-    data = resp.json()
+    data = await _anthropic_post(url, _anthropic_headers(cfg), payload)
     # 响应格式：{"content": [{"type": "text", "text": "..."}, ...]}
     return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+
+
+# ============================== Tool calling（双协议归一化）==============================
+#
+# 归一化消息格式（OpenAI 风格，作为内部统一表示）：
+#   assistant 带工具调用：{"role":"assistant","content":text,"tool_calls":[{"id","name","arguments":dict}]}
+#   工具结果：           {"role":"tool","tool_call_id":id,"name":name,"content":str}
+# 发送前按 provider 翻译成各自线上格式（OpenAI function calling / Anthropic tool_use）。
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass
+class ToolResponse:
+    """chat_with_tools 的归一化返回。"""
+    text: str                    # 助手文本（无工具调用时即终答）
+    tool_calls: list[ToolCall]   # 本轮请求执行的工具（空 = 终答）
+    message: dict                # 归一化 assistant 消息，可直接 append 回 messages
+
+
+def _tools_to_openai(tools: list[dict]) -> list[dict]:
+    """tools 支持两种写法：完整 {"type":"function","function":{...}} 或裸 {"name","description","parameters"}。"""
+    out = []
+    for t in tools:
+        fn = t["function"] if "function" in t else t
+        out.append({
+            "type": "function",
+            "function": {
+                "name": fn["name"],
+                "description": fn.get("description", ""),
+                "parameters": fn.get("parameters", {"type": "object", "properties": {}}),
+            },
+        })
+    return out
+
+
+def _tools_to_anthropic(tools: list[dict]) -> list[dict]:
+    out = []
+    for t in tools:
+        fn = t["function"] if "function" in t else t
+        out.append({
+            "name": fn["name"],
+            "description": fn.get("description", ""),
+            "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
+        })
+    return out
+
+
+def _to_openai_messages(messages: list[dict]) -> list[dict]:
+    """归一化消息 → OpenAI 线上格式（tool_calls.arguments dict → JSON 字符串）。"""
+    out = []
+    for m in messages:
+        role = m.get("role")
+        if role == "assistant" and m.get("tool_calls"):
+            out.append({
+                "role": "assistant",
+                "content": m.get("content") or None,
+                "tool_calls": [
+                    {
+                        "id": tc.get("id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": tc.get("name", ""),
+                            "arguments": json.dumps(tc.get("arguments", {}), ensure_ascii=False),
+                        },
+                    }
+                    for tc in m["tool_calls"]
+                ],
+            })
+        elif role == "tool":
+            content = m.get("content", "")
+            out.append({
+                "role": "tool",
+                "tool_call_id": m.get("tool_call_id", ""),
+                "content": content if isinstance(content, str) else json.dumps(content, ensure_ascii=False),
+            })
+        else:
+            out.append({"role": role, "content": m.get("content", "")})
+    return out
+
+
+def _to_anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
+    """归一化消息 → Anthropic 线上格式。
+
+    - 抽离 system 为独立参数
+    - assistant.tool_calls → content 里的 tool_use blocks
+    - 连续的 role=tool → 合并进一个 user turn 的 tool_result blocks（Anthropic 要求）
+    """
+    system_parts = [
+        m["content"] for m in messages
+        if m.get("role") == "system" and isinstance(m.get("content"), str)
+    ]
+    out: list[dict] = []
+    pending: list[dict] = []
+
+    def flush() -> None:
+        nonlocal pending
+        if pending:
+            out.append({"role": "user", "content": pending})
+            pending = []
+
+    for m in messages:
+        role = m.get("role")
+        if role == "system":
+            continue
+        if role == "tool":
+            content = m.get("content", "")
+            pending.append({
+                "type": "tool_result",
+                "tool_use_id": m.get("tool_call_id", ""),
+                "content": content if isinstance(content, str) else json.dumps(content, ensure_ascii=False),
+            })
+            continue
+        flush()
+        if role == "assistant":
+            blocks: list[dict] = []
+            text = m.get("content")
+            if isinstance(text, str) and text:
+                blocks.append({"type": "text", "text": text})
+            for tc in m.get("tool_calls") or []:
+                args = tc.get("arguments", {})
+                if not isinstance(args, dict):
+                    try:
+                        args = json.loads(args or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+                blocks.append({
+                    "type": "tool_use",
+                    "id": tc.get("id", ""),
+                    "name": tc.get("name", ""),
+                    "input": args,
+                })
+            out.append({"role": "assistant", "content": blocks or [{"type": "text", "text": ""}]})
+        else:  # user
+            out.append({"role": "user", "content": m.get("content", "")})
+    flush()
+    return "\n\n".join(system_parts), out
+
+
+async def _chat_openai_tools(cfg: LLMConfig, messages: list[dict], model: str, tools: list[dict]) -> ToolResponse:
+    kwargs = {}
+    if tools:
+        kwargs = {"tools": _tools_to_openai(tools), "tool_choice": "auto"}
+    async with _sem:
+        resp = await _openai_client(cfg).chat.completions.create(
+            model=model, messages=_to_openai_messages(messages), **kwargs
+        )
+    msg = resp.choices[0].message
+    calls = []
+    for tc in (msg.tool_calls or []):
+        try:
+            args = json.loads(tc.function.arguments or "{}")
+        except json.JSONDecodeError:
+            args = {}
+        calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
+    return ToolResponse(
+        text=msg.content or "",
+        tool_calls=calls,
+        message={
+            "role": "assistant",
+            "content": msg.content or "",
+            "tool_calls": [{"id": c.id, "name": c.name, "arguments": c.arguments} for c in calls],
+        },
+    )
+
+
+async def _chat_anthropic_tools(cfg: LLMConfig, messages: list[dict], model: str, tools: list[dict]) -> ToolResponse:
+    system, anth = _to_anthropic_messages(messages)
+    payload: dict = {"model": model, "max_tokens": 4000, "messages": anth}
+    if system:
+        payload["system"] = system
+    if tools:
+        payload["tools"] = _tools_to_anthropic(tools)
+    url = _endpoint(cfg.base_url, "/v1/messages")
+    data = await _anthropic_post(url, _anthropic_headers(cfg), payload)
+
+    text_parts, calls = [], []
+    for b in data.get("content", []):
+        if b.get("type") == "text":
+            text_parts.append(b.get("text", ""))
+        elif b.get("type") == "tool_use":
+            calls.append(ToolCall(id=b.get("id", ""), name=b.get("name", ""), arguments=b.get("input", {}) or {}))
+    text = "".join(text_parts)
+    return ToolResponse(
+        text=text,
+        tool_calls=calls,
+        message={
+            "role": "assistant",
+            "content": text,
+            "tool_calls": [{"id": c.id, "name": c.name, "arguments": c.arguments} for c in calls],
+        },
+    )
 
 
 # ============================== 对外接口 ==============================
@@ -162,6 +384,23 @@ async def chat_json(messages: list[dict], *, strong: bool = False, cfg: LLMConfi
                 raise ValueError(f"LLM 返回非 JSON：{raw[:200]}")
             messages = [*messages, {"role": "user", "content": "你刚才的输出不是合法 JSON，请重新只输出 JSON。"}]
     raise ValueError("unreachable")
+
+
+async def chat_with_tools(
+    messages: list[dict], tools: list[dict], *, strong: bool = False, cfg: LLMConfig | None = None
+) -> ToolResponse:
+    """带工具的单轮对话：返回归一化 ToolResponse（含 text / tool_calls / 可回填的 assistant message）。
+
+    tools 用 OpenAI function 格式（或裸 {name,description,parameters}）；Anthropic 协议自动翻译。
+    这是所有"真 agent 工具循环"的底座，由 services/agent.py 的 run_agent 驱动多轮。
+    """
+    c = cfg or system_llm_config()
+    if not c.api_key or not (c.model_fast or c.model_strong):
+        raise RuntimeError("LLM 未配置（api_key / model 为空）")
+    model = c.model(strong) or c.model_fast
+    if c.provider == "anthropic":
+        return await _chat_anthropic_tools(c, messages, model, tools)
+    return await _chat_openai_tools(c, messages, model, tools)
 
 
 async def embed_texts(texts: list[str]) -> list[list[float]]:

@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import business_today, settings
 from app.models import Article
 from app.services import llm
 
@@ -39,7 +39,7 @@ async def search(
     embeddings = await llm.embed_texts([query])
     if not embeddings:
         return []
-    since = date.today() - timedelta(days=days)
+    since = business_today() - timedelta(days=days)
     stmt = (
         select(Article)
         .where(

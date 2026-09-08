@@ -1,7 +1,7 @@
 """邮件/digest 渲染：单分类 digest、跨类洞察合并、失败友好提示"""
 import html
-from datetime import date
 
+from app.config import business_today
 from app.models import Article, CATEGORY_SLUGS
 
 CATEGORY_NAMES = {
@@ -19,12 +19,12 @@ def esc(s: str) -> str:
     return html.escape(s or "")
 
 
-# ---- 单分类 digest（07:00 生成草稿）----
+# ---- 单分类 digest（凌晨采集时生成草稿）----
 
 def render_category_digest(category: str, articles: list[Article]) -> tuple[str, str]:
     """返回 (subject, body_html)。"""
     name = CATEGORY_NAMES.get(category, category)
-    subject = f"六类日报 · {name} · {date.today().isoformat()}"
+    subject = f"六类日报 · {name} · {business_today().isoformat()}"
     rows = []
     for a in articles:
         score = f"{a.importance_score:.0f}" if a.importance_score is not None else "-"
@@ -49,7 +49,7 @@ def render_category_digest(category: str, articles: list[Article]) -> tuple[str,
 
 def render_insight(insights: list[dict]) -> tuple[str, str]:
     """insights: [{title, text, related_categories}] → (subject, body_html)。"""
-    subject = f"六类日报 · 今日关联 · {date.today().isoformat()}"
+    subject = f"六类日报 · 今日关联 · {business_today().isoformat()}"
     blocks = []
     for it in insights:
         cats = " × ".join(CATEGORY_NAMES.get(c, c) for c in it.get("related_categories", []))

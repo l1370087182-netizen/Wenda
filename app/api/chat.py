@@ -83,7 +83,7 @@ async def chat(
     else:
         cfg = _to_service_cfg(llm_row)
         try:
-            result = await run_chat(db, question=body.question, history=history, cfg=cfg)
+            result = await run_chat(question=body.question, history=history, cfg=cfg)
         except Exception as e:  # 编排失败也要给用户反馈（带真实原因，便于自查 URL/Key 配置）
             import logging
 

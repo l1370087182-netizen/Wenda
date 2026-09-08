@@ -1,4 +1,4 @@
-"""定时任务：07:00 采集 / 08:00 发送 + 失败兜底 + 管理员重跑"""
+"""定时任务：凌晨采集（默认 01:00）/ 08:00 发送 + 失败兜底 + 管理员重跑"""
 import asyncio
 import logging
 from datetime import date, timedelta
@@ -8,7 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
-from app.config import settings
+from app.config import business_today, settings
 from app.core.security import cleanup_expired_sessions
 from app.models import CATEGORY_SLUGS, Digest, SendLog, User, utcnow
 from app.services import digest as digest_svc
@@ -56,7 +56,7 @@ async def job_collect_daily(target: date | None = None) -> None:
     """日报流水线：多 Agent 编排（graph.run_daily）。"""
     from app.services.graph import run_daily
 
-    target = target or date.today()
+    target = target or business_today()
     try:
         job_run = await run_daily(target)
         logger.info("collect_daily 完成：%s %s", target, job_run.status)
@@ -78,7 +78,7 @@ async def _send_one(to: str, html: str, subject: str) -> None:
 
 
 async def job_send_daily(target: date | None = None) -> None:
-    target = target or date.today()
+    target = target or business_today()
     cutoff = utcnow() - timedelta(days=settings.active_days)
 
     async with SessionFactory() as db:
